@@ -1,3 +1,4 @@
+#include "localization.h"
 #include <windows.h>
 #include <windowsx.h>
 #include <bcrypt.h>
@@ -68,7 +69,7 @@ enum Id { Connect = 101, Setup, Devices, Receive, Copy, Token, ClearRx, Input, C
 HWND window, controls[Send + 1], statusText, progress, rxHeader, txHeader;
 HFONT font;
 UINT dpi = 96;
-bool zh, ready, busy, scanning, scanVisible;
+bool ready, busy, scanning, scanVisible;
 std::wstring deviceName, logText, configPath, fileName;
 std::vector<uint8_t> fileBytes, pendingBytes;
 std::shared_ptr<Session> session;
@@ -86,7 +87,7 @@ constexpr UINT Dispatch = WM_APP + 1;
 constexpr UINT_PTR ScanTimer = 3;
 constexpr wchar_t WindowTitle[] = L"OBDcomm · BLE · 1.1.4";
 wchar_t scanLogPath[MAX_PATH]{};
-const wchar_t* tr(const wchar_t* cn, const wchar_t* en) { return zh ? cn : en; }
+
 void post(std::function<void()> callback) {
     std::lock_guard lock(queueLock);
     if (!alive) return;
@@ -103,9 +104,9 @@ void alert(const std::wstring& text) { MessageBoxW(window, text.c_str(), L"OBDco
 void layout();
 void refresh(const std::wstring& message) {
     set(statusText, message);
-    set(controls[Connect], ready ? tr(L"断开", L"Disconnect") :
-        session ? tr(L"取消连接", L"Cancel connection") :
-        scanning ? tr(L"停止扫描", L"Stop scan") : tr(L"连接", L"Connect"));
+    set(controls[Connect], ready ? tr(Text::Disconnect) :
+        session ? tr(Text::CancelConnection) :
+        scanning ? tr(Text::StopScan) : tr(Text::Connect));
     EnableWindow(controls[Send], ready && !busy);
     layout();
 }
@@ -207,7 +208,7 @@ void updateDevices(std::unordered_map<uint64_t, Device>& devices) {
     ListBox_ResetContent(list);
     for (size_t index = 0; index < rows.size(); ++index) {
         auto const& item = rows[index];
-        auto label = (item.name.empty() ? tr(L"未广播名称", L"Unnamed device") : item.name) +
+        auto label = (item.name.empty() ? tr(Text::UnnamedDevice) : item.name) +
             L"    " + addressText(item.address) + L"    " + std::to_wstring(item.rssi) + L" dBm";
         ListBox_AddString(list, label.c_str());
         if (item.address == address) ListBox_SetCurSel(list, index);
@@ -215,7 +216,7 @@ void updateDevices(std::unordered_map<uint64_t, Device>& devices) {
     ListBox_SetTopIndex(list, top);
     SendMessageW(list, WM_SETREDRAW, TRUE, 0);
     InvalidateRect(list, nullptr, TRUE);
-    set(statusText, tr(L"扫描中 · 双击设备连接 · 已发现 ", L"Scanning · double-click to connect · Found ") + std::to_wstring(rows.size()));
+    set(statusText, tr(Text::ScanningCount) + std::to_wstring(rows.size()));
 }
 void traceScan(const char* line) noexcept {
     if (!scanLogPath[0]) return;
@@ -265,17 +266,17 @@ std::wstring scanStoppedMessage(BluetoothError error) {
     switch (error) {
     case BluetoothError::DisabledByUser:
     case BluetoothError::RadioNotAvailable:
-        return tr(L"蓝牙已关闭或不可用，请检查 Windows 蓝牙设置。", L"Bluetooth is off or unavailable. Check Windows Bluetooth settings.");
+        return tr(Text::BluetoothOff);
     case BluetoothError::NotSupported:
     case BluetoothError::TransportNotSupported:
-        return tr(L"当前蓝牙适配器或驱动不支持 BLE 扫描。", L"The Bluetooth adapter or driver does not support BLE scanning.");
+        return tr(Text::ScanUnsupported);
     case BluetoothError::DisabledByPolicy:
     case BluetoothError::ConsentRequired:
-        return tr(L"Windows 限制了蓝牙访问，请检查系统权限或管理策略。", L"Windows restricted Bluetooth access. Check permissions or system policy.");
+        return tr(Text::BluetoothRestricted);
     case BluetoothError::ResourceInUse:
-        return tr(L"蓝牙资源正被占用，请稍后重试。", L"Bluetooth resources are busy. Try again shortly.");
+        return tr(Text::BluetoothBusy);
     default:
-        return tr(L"扫描已停止 · 蓝牙状态 ", L"Scan stopped · Bluetooth status ") + std::to_wstring(static_cast<int>(error));
+        return tr(Text::ScanStoppedStatus) + std::to_wstring(static_cast<int>(error));
     }
 }
 void failScan(ScanState& state, std::wstring reason) {
@@ -317,7 +318,7 @@ void runScan(std::shared_ptr<ScanState> state) {
                 try { operation.Cancel(); } catch (hresult_error const&) {}
                 if (!canceled) {
                     traceScan("Adapter check timed out\r\n");
-                    failScan(*state, tr(L"蓝牙适配器检测超时，请检查蓝牙驱动。", L"Bluetooth adapter check timed out. Check the Bluetooth driver."));
+                    failScan(*state, tr(Text::AdapterTimeout));
                 }
                 return;
             }
@@ -325,12 +326,12 @@ void runScan(std::shared_ptr<ScanState> state) {
         auto adapter = operation.GetResults();
         if (!adapter) {
             traceScan("Windows returned no Bluetooth adapter\r\n");
-            failScan(*state, tr(L"Windows 未找到可用的蓝牙适配器，请检查蓝牙开关和驱动。", L"Windows found no available Bluetooth adapter. Check Bluetooth settings and the driver."));
+            failScan(*state, tr(Text::NoAdapter));
             return;
         }
         if (!adapter.IsLowEnergySupported() || !adapter.IsCentralRoleSupported()) {
             traceScan("BLE central role unavailable\r\n");
-            failScan(*state, tr(L"当前蓝牙适配器或驱动不支持 BLE 中央设备模式。", L"The Bluetooth adapter or driver does not support the BLE central role."));
+            failScan(*state, tr(Text::CentralUnsupported));
             return;
         }
         {
@@ -392,10 +393,10 @@ void runScan(std::shared_ptr<ScanState> state) {
         traceScan(line);
         wchar_t displayCode[11];
         swprintf_s(displayCode, L"0x%08X", code);
-        failScan(*state, tr(L"扫描失败 · ", L"Scan failed · ") + std::wstring(displayCode) + L" · " + std::wstring(error.message()));
+        failScan(*state, tr(Text::ScanFailed) + std::wstring(displayCode) + L" · " + std::wstring(error.message()));
     } catch (...) {
         traceScan("Unexpected C++ error during scanning\r\n");
-        failScan(*state, tr(L"扫描遇到程序错误。", L"An unexpected error occurred while scanning."));
+        failScan(*state, tr(Text::ScanError));
     }
 }
 void pollScan() {
@@ -412,7 +413,7 @@ void pollScan() {
     if (phase == ScanPhase::Scanning && !scanVisible) {
         scanVisible = true;
         scanDeadline = GetTickCount64() + 60000;
-        refresh(tr(L"扫描中 · 双击设备连接", L"Scanning · double-click to connect"));
+        refresh(tr(Text::Scanning));
     }
     if (!devices.empty()) {
         if (!scanListDrawn) traceScan("Updating the device list with its first results\r\n");
@@ -426,10 +427,10 @@ void pollScan() {
     } else if (phase == ScanPhase::Checking && GetTickCount64() >= scanDeadline) {
         traceScan("Windows did not finish starting the scanner\r\n");
         stopScan();
-        refresh(tr(L"启动 BLE 扫描超时。", L"Starting the BLE scanner timed out."));
+        refresh(tr(Text::ScanStartTimeout));
     } else if (phase == ScanPhase::Scanning && GetTickCount64() >= scanDeadline) {
         stopScan();
-        refresh(tr(L"扫描结束 · 双击设备连接", L"Scan finished · double-click to connect"));
+        refresh(tr(Text::ScanFinished));
     }
 }
 void startScan() {
@@ -446,15 +447,15 @@ void startScan() {
         scan = std::make_shared<ScanState>();
         if (!SetTimer(window, ScanTimer, 150, nullptr)) {
             stopScan();
-            refresh(tr(L"无法启动蓝牙扫描计时器。", L"Could not start the Bluetooth scan timer."));
+            refresh(tr(Text::ScanTimerError));
             return;
         }
         std::thread(runScan, scan).detach();
-        refresh(tr(L"正在检测 Windows 蓝牙适配器…", L"Checking the Windows Bluetooth adapter…"));
+        refresh(tr(Text::CheckingAdapter));
     } catch (...) {
         traceScan("Unable to launch scan worker\r\n");
         stopScan();
-        refresh(tr(L"无法启动扫描。", L"Could not start scanning."));
+        refresh(tr(Text::StartScanError));
     }
 }
 void connect(Device selected) {
@@ -463,7 +464,7 @@ void connect(Device selected) {
     auto current = std::make_shared<Session>();
     session = current;
     deviceName = selected.name.empty() ? addressText(selected.address) : selected.name;
-    refresh(tr(L"正在连接 · ", L"Connecting · ") + deviceName);
+    refresh(tr(Text::Connecting) + deviceName);
     SetTimer(window, 2, 20000, nullptr);
     auto rxId = guid{ std::wstring_view(settings.rx) };
     auto txId = guid{ std::wstring_view(settings.tx) };
@@ -473,11 +474,11 @@ void connect(Device selected) {
             current->device = selected.type == BluetoothAddressType::Unspecified
                 ? BluetoothLEDevice::FromBluetoothAddressAsync(selected.address).get()
                 : BluetoothLEDevice::FromBluetoothAddressAsync(selected.address, selected.type).get();
-            if (!current->device) throw hresult_error(E_FAIL, tr(L"找不到蓝牙设备", L"Bluetooth device unavailable"));
+            if (!current->device) throw hresult_error(E_FAIL, tr(Text::DeviceUnavailable));
             if (current->canceled) return;
             auto result = current->device.GetGattServicesAsync(BluetoothCacheMode::Uncached).get();
             if (result.Status() != GattCommunicationStatus::Success)
-                throw hresult_error(E_FAIL, tr(L"发现服务失败", L"Service discovery failed"));
+                throw hresult_error(E_FAIL, tr(Text::ServiceDiscoveryError));
             for (auto const& service : result.Services()) current->services.push_back(service);
             for (auto const& service : current->services) {
                 if (current->canceled) return;
@@ -490,16 +491,16 @@ void connect(Device selected) {
                 if (current->rx && current->tx) break;
             }
             if (!current->rx || !current->tx)
-                throw hresult_error(E_FAIL, tr(L"找不到配置的 UUID", L"Configured UUID not found"));
+                throw hresult_error(E_FAIL, tr(Text::UuidMissing));
             auto properties = current->tx.CharacteristicProperties();
             if ((properties & (GattCharacteristicProperties::Write | GattCharacteristicProperties::WriteWithoutResponse)) == GattCharacteristicProperties::None)
-                throw hresult_error(E_FAIL, tr(L"发送特征不可写", L"TX characteristic is not writable"));
+                throw hresult_error(E_FAIL, tr(Text::TxNotWritable));
             auto rxProperties = current->rx.CharacteristicProperties();
             auto mode = GattClientCharacteristicConfigurationDescriptorValue::Indicate;
             if ((rxProperties & GattCharacteristicProperties::Notify) != GattCharacteristicProperties::None)
                 mode = GattClientCharacteristicConfigurationDescriptorValue::Notify;
             else if ((rxProperties & GattCharacteristicProperties::Indicate) == GattCharacteristicProperties::None)
-                throw hresult_error(E_FAIL, tr(L"接收特征不支持通知", L"RX notifications unavailable"));
+                throw hresult_error(E_FAIL, tr(Text::NoNotifications));
             std::weak_ptr<Session> weak = current;
             current->data = current->rx.ValueChanged([weak](auto const&, auto const& args) {
                 try {
@@ -512,21 +513,21 @@ void connect(Device selected) {
             });
             if (current->canceled) return;
             if (current->rx.WriteClientCharacteristicConfigurationDescriptorAsync(mode).get() != GattCommunicationStatus::Success)
-                throw hresult_error(E_FAIL, tr(L"订阅失败", L"Subscription failed"));
+                throw hresult_error(E_FAIL, tr(Text::SubscriptionError));
             current->state = current->device.ConnectionStatusChanged([weak](auto const& sender, auto const&) {
                 try {
                     if (sender.ConnectionStatus() == BluetoothConnectionStatus::Disconnected)
-                        post([weak] { if (session && session == weak.lock()) disconnect(tr(L"设备已断开", L"Device disconnected")); });
+                        post([weak] { if (session && session == weak.lock()) disconnect(tr(Text::DeviceDisconnected)); });
                 } catch (...) {}
             });
             if (current->device.ConnectionStatus() != BluetoothConnectionStatus::Connected)
-                throw hresult_error(E_FAIL, tr(L"设备已断开", L"Device disconnected"));
+                throw hresult_error(E_FAIL, tr(Text::DeviceDisconnected));
             post([weak] {
                 if (!session || session != weak.lock()) return;
                 KillTimer(window, 2);
                 ready = true;
                 set(progress, L"");
-                refresh(tr(L"已连接 · ", L"Connected · ") + deviceName);
+                refresh(tr(Text::Connected) + deviceName);
             });
         } catch (hresult_error const& error) {
             post([weak = std::weak_ptr(current), message = std::wstring(error.message())] {
@@ -540,7 +541,7 @@ void sendCurrent() {
     std::vector<uint8_t> bytes;
     if (!fileName.empty()) {
         auto prompt = fileName + L" (" + std::to_wstring(fileBytes.size()) + L" bytes)\n\n" +
-            tr(L"原样发送文件，不附加换行。确认发送？", L"Send this file as raw bytes without a newline?");
+            tr(Text::ConfirmRawFile);
         if (MessageBoxW(window, prompt.c_str(), L"OBDcomm", MB_OKCANCEL | MB_ICONQUESTION) != IDOK || !ready || busy) return;
         bytes = fileBytes;
     } else {
@@ -578,14 +579,14 @@ void sendCurrent() {
                     if (current->canceled || GetTickCount64() >= deadline) {
                         operation.Cancel();
                         if (!current->canceled)
-                            post([weak] { if (session && session == weak.lock()) disconnect(tr(L"写入超时，已断开", L"Write timed out. Disconnected.")); });
+                            post([weak] { if (session && session == weak.lock()) disconnect(tr(Text::WriteTimeout)); });
                         return;
                     }
                     Sleep(5);
                 }
                 auto result = operation.GetResults();
                 if (result != GattCommunicationStatus::Success)
-                    throw hresult_error(E_FAIL, tr(L"蓝牙写入失败", L"Bluetooth write failed"));
+                    throw hresult_error(E_FAIL, tr(Text::WriteFailed));
                 offset += count;
                 if (offset != bytes.size() && GetTickCount64() - lastUpdate >= 100) {
                     lastUpdate = GetTickCount64();
@@ -627,7 +628,7 @@ void clipboard(std::wstring const& value) {
     }
     if (memory) {
         GlobalFree(memory);
-        alert(tr(L"无法复制到剪贴板", L"Could not copy to clipboard"));
+        alert(tr(Text::ClipboardError));
     }
 }
 void copyToken() {
@@ -641,7 +642,7 @@ void copyToken() {
             if (size && payload.size() % 2 == 0 && size == payload.size() / 2) latest = std::move(payload);
         } catch (std::out_of_range const&) {}
     }
-    if (latest.empty()) alert(tr(L"未找到长度匹配的 token", L"No token with a matching length found"));
+    if (latest.empty()) alert(tr(Text::TokenMissing));
     else clipboard(latest);
 }
 void loadFile() {
@@ -656,13 +657,13 @@ void loadFile() {
     std::ifstream input(std::filesystem::path(path), std::ios::binary | std::ios::ate);
     const auto size = input ? input.tellg() : std::streampos(-1);
     if (size < 0 || size > 8388608) {
-        alert(tr(L"无法读取文件，或文件超过 8 MiB。", L"Could not read the file or it exceeds 8 MiB."));
+        alert(tr(Text::FileLimit));
         return;
     }
     std::vector<uint8_t> bytes(static_cast<size_t>(size));
     input.seekg(0);
     if (size && !input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(size))) {
-        alert(tr(L"文件读取失败", L"File read failed"));
+        alert(tr(Text::FileReadError));
         return;
     }
     fileBytes = std::move(bytes);
@@ -706,10 +707,10 @@ std::wstring passwordVerifier(std::wstring const& password, std::wstring const& 
 }
 INT_PTR CALLBACK unlockProc(HWND dialog, UINT message, WPARAM w, LPARAM) {
     if (message == WM_INITDIALOG) {
-        SetWindowTextW(dialog, tr(L"解锁 OBDcomm", L"Unlock OBDcomm"));
-        SetDlgItemTextW(dialog, 1002, tr(L"输入密码", L"Enter password"));
-        SetDlgItemTextW(dialog, IDOK, tr(L"解锁", L"Unlock"));
-        SetDlgItemTextW(dialog, IDCANCEL, tr(L"退出", L"Exit"));
+        SetWindowTextW(dialog, tr(Text::UnlockTitle));
+        SetDlgItemTextW(dialog, 1002, tr(Text::EnterPassword));
+        SetDlgItemTextW(dialog, IDOK, tr(Text::Unlock));
+        SetDlgItemTextW(dialog, IDCANCEL, tr(Text::Exit));
         SendDlgItemMessageW(dialog, 1001, EM_SETLIMITTEXT, 128, 0);
         return TRUE;
     }
@@ -722,7 +723,7 @@ INT_PTR CALLBACK unlockProc(HWND dialog, UINT message, WPARAM w, LPARAM) {
         if (!password.empty() && passwordVerifier(password, settings.passwordVerifier) == settings.passwordVerifier)
             EndDialog(dialog, IDOK);
         else {
-            MessageBoxW(dialog, tr(L"密码错误。", L"Incorrect password."), L"OBDcomm", MB_OK | MB_ICONWARNING);
+            MessageBoxW(dialog, tr(Text::IncorrectPassword), L"OBDcomm", MB_OK | MB_ICONWARNING);
             SetFocus(GetDlgItem(dialog, 1001));
             SendDlgItemMessageW(dialog, 1001, EM_SETSEL, 0, -1);
         }
@@ -773,7 +774,7 @@ HWND make(HWND owner, const wchar_t* type, const wchar_t* title, DWORD style, in
 }
 HFONT createFont(UINT monitorDpi) {
     return CreateFontW(-MulDiv(10, monitorDpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, zh ? L"Microsoft YaHei UI" : L"Segoe UI");
+        DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, uiFont());
 }
 void place(HWND control, int x, int y, int width, int height, UINT scale) {
     MoveWindow(control, MulDiv(x, scale, 96), MulDiv(y, scale, 96),
@@ -831,32 +832,32 @@ LRESULT CALLBACK settingsProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
         view = static_cast<SettingsWindow*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);
         view->dialog = dialog;
         SetWindowLongPtrW(dialog, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(view));
-        view->rxLabel = make(dialog, L"STATIC", tr(L"接收 UUID", L"Receive UUID"), 0);
+        view->rxLabel = make(dialog, L"STATIC", tr(Text::ReceiveUuid), 0);
         make(dialog, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, Srx, WS_EX_CLIENTEDGE);
-        view->txLabel = make(dialog, L"STATIC", tr(L"发送 UUID", L"Send UUID"), 0);
+        view->txLabel = make(dialog, L"STATIC", tr(Text::SendUuid), 0);
         make(dialog, L"EDIT", L"", WS_TABSTOP | ES_AUTOHSCROLL, Stx, WS_EX_CLIENTEDGE);
-        view->encodingLabel = make(dialog, L"STATIC", tr(L"编码", L"Encoding"), 0);
-        view->endingLabel = make(dialog, L"STATIC", tr(L"发送换行", L"Send line ending"), 0);
+        view->encodingLabel = make(dialog, L"STATIC", tr(Text::Encoding), 0);
+        view->endingLabel = make(dialog, L"STATIC", tr(Text::SendLineEnding), 0);
         auto encoding = make(dialog, L"COMBOBOX", L"", WS_TABSTOP | CBS_DROPDOWNLIST, Sencoding);
         auto ending = make(dialog, L"COMBOBOX", L"", WS_TABSTOP | CBS_DROPDOWNLIST, Sending);
         for (auto label : { L"UTF-8", L"GBK" }) ComboBox_AddString(encoding, label);
         for (auto label : { L"CRLF", L"CR", L"LF" }) ComboBox_AddString(ending, label);
-        make(dialog, L"BUTTON", tr(L"接收提示音（间隔至少 1.5 秒）", L"Receive sound (at least 1.5 seconds apart)"), WS_TABSTOP | BS_AUTOCHECKBOX, Ssound);
-        make(dialog, L"BUTTON", tr(L"显示复制 token 按钮", L"Show Copy token button"), WS_TABSTOP | BS_AUTOCHECKBOX, Stoken);
-        make(dialog, L"BUTTON", tr(L"使用密码（每次启动时验证）", L"Require a password at startup"), WS_TABSTOP | BS_AUTOCHECKBOX, SusePassword);
+        make(dialog, L"BUTTON", tr(Text::ReceiveSound), WS_TABSTOP | BS_AUTOCHECKBOX, Ssound);
+        make(dialog, L"BUTTON", tr(Text::ShowCopyToken), WS_TABSTOP | BS_AUTOCHECKBOX, Stoken);
+        make(dialog, L"BUTTON", tr(Text::RequirePassword), WS_TABSTOP | BS_AUTOCHECKBOX, SusePassword);
         auto password = make(dialog, L"EDIT", L"", WS_TABSTOP | ES_PASSWORD | ES_AUTOHSCROLL, Spassword, WS_EX_CLIENTEDGE);
         auto confirmation = make(dialog, L"EDIT", L"", WS_TABSTOP | ES_PASSWORD | ES_AUTOHSCROLL, Sconfirm, WS_EX_CLIENTEDGE);
-        Edit_SetCueBannerText(password, tr(L"输入新密码", L"New password"));
-        Edit_SetCueBannerText(confirmation, tr(L"确认新密码", L"Confirm password"));
+        Edit_SetCueBannerText(password, tr(Text::NewPassword));
+        Edit_SetCueBannerText(confirmation, tr(Text::ConfirmPassword));
         Edit_LimitText(password, 128);
         Edit_LimitText(confirmation, 128);
         CheckDlgButton(dialog, SusePassword, settings.passwordVerifier.empty() ? BST_UNCHECKED : BST_CHECKED);
         view->updatePasswordFields();
-        view->hint = make(dialog, L"STATIC", tr(L"保存设置会断开当前连接。", L"Saving settings disconnects the current device."), 0);
-        make(dialog, L"BUTTON", tr(L"恢复默认值", L"Restore defaults"), WS_TABSTOP, Sdefaults);
-        make(dialog, L"BUTTON", tr(L"载入发送文件", L"Load file"), WS_TABSTOP, Sfile);
-        make(dialog, L"BUTTON", tr(L"保存", L"Save"), WS_TABSTOP, Ssave);
-        make(dialog, L"BUTTON", tr(L"取消", L"Cancel"), WS_TABSTOP, Scancel);
+        view->hint = make(dialog, L"STATIC", tr(Text::SaveDisconnects), 0);
+        make(dialog, L"BUTTON", tr(Text::RestoreDefaults), WS_TABSTOP, Sdefaults);
+        make(dialog, L"BUTTON", tr(Text::LoadFile), WS_TABSTOP, Sfile);
+        make(dialog, L"BUTTON", tr(Text::Save), WS_TABSTOP, Ssave);
+        make(dialog, L"BUTTON", tr(Text::Cancel), WS_TABSTOP, Scancel);
         view->fill(settings);
         view->resize();
         return 0;
@@ -880,7 +881,7 @@ LRESULT CALLBACK settingsProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
             next.rx = read(GetDlgItem(dialog, Srx));
             next.tx = read(GetDlgItem(dialog, Stx));
             if (!validGuid(next.rx) || !validGuid(next.tx)) {
-                MessageBoxW(dialog, tr(L"请输入有效的完整 UUID。", L"Enter valid full UUIDs."), L"OBDcomm", MB_OK | MB_ICONWARNING);
+                MessageBoxW(dialog, tr(Text::InvalidUuid), L"OBDcomm", MB_OK | MB_ICONWARNING);
                 return 0;
             }
             next.encoding = ComboBox_GetCurSel(GetDlgItem(dialog, Sencoding));
@@ -892,24 +893,24 @@ LRESULT CALLBACK settingsProc(HWND dialog, UINT message, WPARAM w, LPARAM l) {
                 if (next.passwordVerifier.empty()) {
                     auto password = read(GetDlgItem(dialog, Spassword));
                     if (password.empty() || password != read(GetDlgItem(dialog, Sconfirm))) {
-                        MessageBoxW(dialog, tr(L"请输入密码，并确认两次密码一致。", L"Enter a password and confirm it."), L"OBDcomm", MB_OK | MB_ICONWARNING);
+                        MessageBoxW(dialog, tr(Text::PasswordMismatch), L"OBDcomm", MB_OK | MB_ICONWARNING);
                         return 0;
                     }
                     next.passwordVerifier = passwordVerifier(password);
                     if (next.passwordVerifier.empty()) {
-                        MessageBoxW(dialog, tr(L"无法设置密码。", L"Could not set the password."), L"OBDcomm", MB_OK | MB_ICONERROR);
+                        MessageBoxW(dialog, tr(Text::PasswordError), L"OBDcomm", MB_OK | MB_ICONERROR);
                         return 0;
                     }
                 }
             }
             if (!saveSettings(next)) {
-                MessageBoxW(dialog, tr(L"无法保存设置。", L"Could not save settings."), L"OBDcomm", MB_OK | MB_ICONERROR);
+                MessageBoxW(dialog, tr(Text::SaveError), L"OBDcomm", MB_OK | MB_ICONERROR);
                 return 0;
             }
             settings = std::move(next);
             stopScan();
             scanVisible = false;
-            disconnect(tr(L"未连接", L"Disconnected"));
+            disconnect(tr(Text::Disconnected));
             DestroyWindow(dialog);
             return 0;
         }
@@ -928,7 +929,7 @@ void showSettings() {
     AdjustWindowRectExForDpi(&bounds, style, FALSE, WS_EX_DLGMODALFRAME, dpi);
     int w = bounds.right - bounds.left, h = bounds.bottom - bounds.top;
     auto dialog = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, L"OBDcommSettings",
-        tr(L"设置", L"Settings"), style, (parent.left + parent.right - w) / 2,
+        tr(Text::Settings), style, (parent.left + parent.right - w) / 2,
         (parent.top + parent.bottom - h) / 2, w, h, window, nullptr, GetModuleHandleW(nullptr), &view);
     if (!dialog) return;
     EnableWindow(window, FALSE);
@@ -994,23 +995,23 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
         window = hwnd;
         dpi = GetDpiForWindow(hwnd);
         controls[Connect] = make(hwnd, L"BUTTON", L"", WS_TABSTOP, Connect);
-        controls[Setup] = make(hwnd, L"BUTTON", tr(L"设置", L"Settings"), WS_TABSTOP, Setup);
+        controls[Setup] = make(hwnd, L"BUTTON", tr(Text::Settings), WS_TABSTOP, Setup);
         statusText = make(hwnd, L"STATIC", L"", SS_ENDELLIPSIS);
         controls[Devices] = make(hwnd, L"LISTBOX", L"", WS_TABSTOP | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL, Devices, WS_EX_CLIENTEDGE);
-        rxHeader = make(hwnd, L"STATIC", tr(L"接收数据", L"Received data"), 0);
-        controls[Copy] = make(hwnd, L"BUTTON", tr(L"复制接收数据", L"Copy received"), WS_TABSTOP, Copy);
-        controls[Token] = make(hwnd, L"BUTTON", tr(L"复制 token", L"Copy token"), WS_TABSTOP, Token);
-        controls[ClearRx] = make(hwnd, L"BUTTON", tr(L"清除接收", L"Clear RX"), WS_TABSTOP, ClearRx);
+        rxHeader = make(hwnd, L"STATIC", tr(Text::ReceivedData), 0);
+        controls[Copy] = make(hwnd, L"BUTTON", tr(Text::CopyReceived), WS_TABSTOP, Copy);
+        controls[Token] = make(hwnd, L"BUTTON", tr(Text::CopyToken), WS_TABSTOP, Token);
+        controls[ClearRx] = make(hwnd, L"BUTTON", tr(Text::ClearRx), WS_TABSTOP, ClearRx);
         controls[Receive] = make(hwnd, MSFTEDIT_CLASS, L"", WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL, Receive, WS_EX_CLIENTEDGE);
         SendMessageW(controls[Receive], EM_EXLIMITTEXT, 0, 262144);
-        txHeader = make(hwnd, L"STATIC", tr(L"发送内容", L"Send data"), 0);
+        txHeader = make(hwnd, L"STATIC", tr(Text::SendData), 0);
         controls[Input] = make(hwnd, L"EDIT", L"", WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL, Input, WS_EX_CLIENTEDGE);
         SendMessageW(controls[Input], EM_SETLIMITTEXT, 131072, 0);
-        controls[ClearTx] = make(hwnd, L"BUTTON", tr(L"清除输入", L"Clear input"), WS_TABSTOP, ClearTx);
-        controls[Send] = make(hwnd, L"BUTTON", tr(L"发送", L"Send"), WS_TABSTOP, Send);
+        controls[ClearTx] = make(hwnd, L"BUTTON", tr(Text::ClearInput), WS_TABSTOP, ClearTx);
+        controls[Send] = make(hwnd, L"BUTTON", tr(Text::Send), WS_TABSTOP, Send);
         progress = make(hwnd, L"STATIC", L"", SS_ENDELLIPSIS);
         applyDpi();
-        refresh(tr(L"未连接", L"Disconnected"));
+        refresh(tr(Text::Disconnected));
         return 0;
     case WM_SIZE: layout(); return 0;
     case WM_DPICHANGED: {
@@ -1035,10 +1036,10 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
             } catch (...) {
                 traceScan("Unexpected C++ error updating the scan window\r\n");
                 stopScan();
-                refresh(tr(L"更新扫描结果时发生程序错误。", L"An unexpected error occurred updating scan results."));
+                refresh(tr(Text::UpdateScanError));
             }
         }
-        if (w == 2 && session && !ready) disconnect(tr(L"连接超时", L"Connection timed out"));
+        if (w == 2 && session && !ready) disconnect(tr(Text::ConnectionTimeout));
         return 0;
     case Dispatch: {
         std::vector<std::function<void()>> tasks;
@@ -1052,13 +1053,13 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
     case WM_COMMAND:
         switch (LOWORD(w)) {
         case Connect:
-            if (session) disconnect(tr(L"未连接", L"Disconnected"));
+            if (session) disconnect(tr(Text::Disconnected));
             else if (scanning) {
                 const bool checkingAdapter = !scanVisible;
                 stopScan();
                 traceScan("Scan canceled by the user\r\n");
-                refresh(checkingAdapter ? tr(L"已取消蓝牙检测", L"Bluetooth check canceled") :
-                    tr(L"扫描已停止 · 双击设备连接", L"Scan stopped · double-click to connect"));
+                refresh(checkingAdapter ? tr(Text::CheckCanceled) :
+                    tr(Text::ScanStopped));
             } else startScan();
             return 0;
         case Devices:
@@ -1100,7 +1101,7 @@ LRESULT CALLBACK windowProc(HWND hwnd, UINT message, WPARAM w, LPARAM l) {
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     init_apartment(apartment_type::single_threaded);
-    zh = PRIMARYLANGID(GetUserDefaultUILanguage()) == LANG_CHINESE;
+
     auto richEdit = LoadLibraryExW(L"Msftedit.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!richEdit) return 1;
     loadSettings();

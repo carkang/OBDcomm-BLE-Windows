@@ -1,24 +1,32 @@
-# OBDcomm for Windows
+# OBDcomm BLE for Windows
 
-OBDcomm 是 Windows 上的 BLE 串口终端，支持 Windows 10 2004 及以上版本（x64）和 Windows 11 x64。电脑需配备 BLE 适配器。
+[简体中文](README.zh-CN.md)
 
-## 使用
+OBDcomm is a Bluetooth Low Energy (BLE) terminal for Windows 10 version 2004 or later and Windows 11 on x64. It requires a BLE adapter.
 
-1. 打开 Windows 蓝牙并运行程序。
-2. 点击「连接」扫描设备，双击设备或选中后按 Enter 连接。
-3. 在「设置」中可配置收发 UUID、编码、发送换行、接收提示音和复制 token 按钮，也可载入最大 8 MiB 的发送文件。
-4. 如需启动密码，在「设置」勾选「使用密码」，输入并确认密码后保存。每次重新启动程序都需要密码。解锁后可在设置中取消勾选并保存。
+## Download and use
 
-设置保存在 `%LOCALAPPDATA%\OBDcomm\settings.ini`。
+1. Download the Windows x64 executable from [GitHub Releases](https://github.com/carkang/OBDcomm-BLE-Windows/releases) or build from source using the instructions below.
+2. Turn on Bluetooth and select **Connect** to scan. Double-click a device or select it and press Enter to connect.
+3. Use **Settings** to configure the receive and send UUIDs, encoding, line endings, receive sounds, and the Copy token button. You can also load files up to 8 MiB for transmission.
+4. To lock the app at startup, enable **Require a password at startup**, enter and confirm your password, and save. To turn it off, unlock the app, clear the checkbox, and save.
 
-## 构建
+Settings are stored in `%LOCALAPPDATA%\OBDcomm\settings.ini`.
 
-安装 Visual Studio 2022 或 Build Tools 的 C++ 桌面开发组件，以及包含 C++/WinRT 头文件的 Windows 10/11 SDK。在仓库根目录运行：
+## Interface languages
+
+The app reads the Windows display language at startup. English, Simplified Chinese, Spanish, and Japanese are available. English is the default for other Windows display languages. Restart the app after changing the Windows display language.
+
+## Build from source
+
+Install Visual Studio 2022 or Build Tools with **Desktop development with C++** and a Windows 10 or 11 SDK that includes C++/WinRT. From the repository root, run the following command.
 
 ```cmd
 windows\build.cmd
 ```
 
-输出文件为 `build\windows\OBDcomm-Windows-x64.exe`。
+The executable is created at `build\windows\OBDcomm-Windows-x64.exe`.
 
-本项目采用 MIT 许可证，详见 [LICENSE](LICENSE)。
+## License
+
+[MIT](LICENSE)
